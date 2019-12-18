@@ -1,0 +1,121 @@
+/*
+* program4.lpp
+* Heather Aust
+* COSC 4785 Fall 2019
+* Program 04
+* October 31, 2019
+*/
+
+%{
+#include <iostream>
+#include <string>
+#include "node.hpp"
+#include "errVal.hpp"
+#include "program4.tab.hpp"
+#include <vector>
+
+using namespace std;
+
+int yyColumn=1;
+int yyPrevColumn=1;
+int syntErrCol=1;
+int yyRow=1;
+vector<string> lines;
+vector<ErrVal*> errors;
+string currLine;
+string idPrtStr = "ID --> ";
+extern void addToCurrLine();
+extern void newLine();
+
+/*
+ * yyerror() function
+ */
+void yyerror(const char *msg)
+{
+  return;
+  //errors.push_back(new ErrVal(yyRow, yyPrevColumn, msg));
+}
+
+/*
+ * yyadderror() function
+ */
+void yyadderror(const char *msg)
+{
+  errors.push_back(new ErrVal(yyRow, yyPrevColumn, msg));
+}
+
+%}
+
+%option outfile="program4_lex.cpp"
+%option noyywrap
+%option yylineno
+%x comment
+%x error
+
+space         [ ]
+tab           [\t]
+number        [0-9]+
+identifier    [_a-zA-Z][_0-9a-zA-Z]*
+
+%%
+\/\/.*[\n]              {newLine();}
+"/*"                     BEGIN(comment);
+<comment>[^*\n]*        {addToCurrLine();}
+<comment>"*"+[^*/\n]*   {addToCurrLine();}
+<comment>\n             {newLine();}
+<comment>"*"+"/"        {addToCurrLine(); BEGIN(INITIAL);}
+<comment><<EOF>>        {addToCurrLine();
+                         yyerror("Comment block not terminated");
+                         currLine+= '\n'; newLine();
+                         yyterminate();}
+"("       {addToCurrLine(); return LPAREN;}
+")"       {addToCurrLine(); return RPAREN;}
+"["       {addToCurrLine(); return LBRACK;}
+"]"       {addToCurrLine(); return RBRACK;}
+"{"       {addToCurrLine(); return LBRACE;}
+"}"       {addToCurrLine(); return RBRACE;}
+"+"       {addToCurrLine(); return PLUS;}
+"-"       {addToCurrLine(); return MINUS;}
+"||"      {addToCurrLine(); return OR;}
+"*"       {addToCurrLine(); return TIMES;}
+"/"       {addToCurrLine(); return DIV;}
+"%"       {addToCurrLine(); return MOD;}
+"&&"      {addToCurrLine(); return AND;}
+"=="      {addToCurrLine(); return EQ;}
+"!="      {addToCurrLine(); return NE;}
+">="      {addToCurrLine(); return GE;}
+"<="      {addToCurrLine(); return LE;}
+">"       {addToCurrLine(); return GT;}
+"<"       {addToCurrLine(); return LT;}
+"!"       {addToCurrLine(); return NOT;}
+";"       {addToCurrLine(); return SEMI;}
+","       {addToCurrLine(); return COMMA;}
+"="       {addToCurrLine(); return ASSIGN;}
+"int"     {addToCurrLine(); return INT;}
+"void"    {addToCurrLine(); return VOID;}
+"class"   {addToCurrLine(); return CLASS;}
+"new"     {addToCurrLine(); return NEW;}
+"print"   {addToCurrLine(); return PRINT;}
+"read"    {addToCurrLine(); return READ;}
+"return"  {addToCurrLine(); return RETURN;}
+"while"   {addToCurrLine(); return WHILE;}
+"if"      {addToCurrLine(); return IF;}
+"else"    {addToCurrLine(); return ELSE;}
+"this"    {addToCurrLine(); return THIS;}
+"null"    {addToCurrLine(); return NULLT;}
+"."       {addToCurrLine(); return DOT;}
+{identifier}    {yylval.ttype=new Node;
+           yylval.ttype->setval(idPrtStr + yytext +'\n');
+           addToCurrLine();
+           return ID;}
+{number}  {yylval.ttype=new Node(new NodeNum(atoi(yytext)));
+           yylval.ttype->setval("NUMBER --> ");
+           addToCurrLine();
+           return NUMBER;}
+{tab}     {addToCurrLine();}
+{space}+  {addToCurrLine();}
+[\n]      {newLine();}
+<<EOF>>   {currLine+= '\n'; newLine(); yyterminate();}
+.         {addToCurrLine(); 
+           yyerror("Lexical Error: Unrecognized character");}
+%%

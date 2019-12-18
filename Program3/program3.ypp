@@ -1,0 +1,367 @@
+/* vim: ft=yacc
+ * That vim filetype setting is not need if I don't rename the file
+ * Simple Infix notation calculator.  
+ *
+ * $Author: kbuckner $
+ * $Date: 2019-10-07 14:37:15-06 $
+ * $Id: simple.ypp,v 1.2 2019-10-07 14:37:15-06 kbuckner Exp kbuckner $
+ *
+ * Based on the Bison examples. But I had to fall back to the old style
+ * union because could not get the api.value.type declaration to
+ * work with a pointer. 
+ * 
+ * $Log: simple.ypp,v $
+ * Revision 1.2  2019-10-07 14:37:15-06  kbuckner
+ * changed to ypp. Added some comments.
+ *
+ * Revision 1.1  2017-10-04 13:20:53-06  kbuckner
+ * Finally working version
+ * 
+ * Edited by Heather Aust
+ * Program 3
+ * Compilers
+ * Oct 22, 2019
+ *
+ */
+%{
+
+#include <iostream>
+#include <FlexLexer.h>
+#include "node.hpp"
+
+//using namespace std;
+using std::cerr;
+using std::cout;
+using std::endl;
+using std::string;
+
+/*
+ * These are declared in "main" so that we can pass values between
+ * the two portions of the program.
+ */
+
+extern Node *tree;
+extern yyFlexLexer scanner;
+
+/* 
+ * Need to do this define, an "acceptable" hack to interface
+ * the C++ scanner with the C parser. 
+ * I can still use things like scanner.YYtext() here if I want. Just that
+ * bison does not know about cpp scanners. 
+ */
+
+#define yylex() scanner.yylex()
+
+// need the function prototype for the parser.
+
+void yyerror(const char *);
+
+
+/*
+ * There are lots of examples that have multiple types in the union here.
+ * Do not do that. Keep it simple, one type. This is the type that you use
+ * in the definitions for %type tokens.
+ */
+
+%}
+
+%union {
+  Node *ttype;
+}
+
+/* 
+ * Bison declarations.  All the 'names' here will be put into an enum
+ * in the *.tab.h file. Include that in the .l/.lpp file and then "return NUM;"
+ * passes back the value. 
+ *
+ * To assign pass the parser a value, say for NUM, you must use 
+ * yylval.ttype in the scanner. You could have a number of things in the union
+ * but do not get cute. pointers, char, int, double. DO NOT use a class or 
+ * struct. 
+ *
+ * The "exp" is only used here in this file but must be given a type if 
+ *(in this case) it is ever assigned a value. See the rules.
+ */
+%type<ttype> exp
+%type<ttype> program elements vardec newexp type simpletype 
+%type<ttype> bracketexps bracketexp multibrackets name idbrack
+%token<ttype> NUMBER ID READ NULLT NEW INT THIS
+%token LPAREN RPAREN LBRACK RBRACK SEMI DOT
+%left PLUS MINUS OR NOT    /* shift-reduce errors are solved by this */
+%left TIMES DIV MOD AND     /* shift-reduce errors are solved by this */
+%left EQ NE GE LE GT LT
+%precedence NEG     /* exponentiation */
+
+%% /* The grammar follows.  */
+
+input:  program  {
+                  /* 
+                  * We have reached the end of the input and
+                  * now we are passing the results to the main function.
+                  */
+                  tree=$1;
+                  }
+;
+program: elements {
+                  $$=new nodeString("<program> --> <elements>\n");
+                  $$->setleft($1);
+                  }
+       | program elements { 
+                  $$=new Node($1,$2);
+                  $$->setval("<program> --> <program> <elements>\n");
+                  }
+;
+
+elements: vardec  {
+                  $$=new nodeString("<elements> --> <vardec>\n");
+                  $$->setleft($1);
+                  }       
+       | exp SEMI {
+                  $$=new nodeString("<elements> --> <exp> SEMI\n");
+                  $$->setleft($1);
+                  }
+       | SEMI     {
+                  $$=new nodeString("<elements> --> SEMI\n");
+                  }
+       | error SEMI {
+                  $$=new nodeString("<elements> --> error SEMI\n");
+                  yyerrok;
+                  }
+;
+vardec: type ID SEMI {
+                  //$$=new Node($1, new nodeString($2->getstring() + "; ")); 
+                  //delete $2;
+                  //$$->setval(" "); 
+                  $$=new Node($1, $2); 
+                  $$->setval("<vardec> --> <type> ID SEMI\n");
+                  }
+       | ID ID SEMI {
+                 //$$=new nodeString($1->getstring()+" "+$2->getstring()+"; ");
+                  //delete $1; delete $2; 
+                  $$=new Node($1,$2);
+                  $$->setval("<vardec> --> ID ID SEMI\n");
+                  }
+       | type multibrackets ID SEMI    {
+                  //$$=new nodePrintAtEnd($1, $2);
+                  //$$->setval($3->getstring() + "; ");
+                  //delete $3;
+                  $$=new nodeThreeChildren($1, $2, $3);
+                  $$->setval("<vardec> --> <type> <multibrackets> ID SEMI\n");
+                  }
+       | ID multibrackets ID SEMI    {
+                  //$$=new nodePrintAtEnd(new nodeString($1->getstring()), $2);
+                  //$$->setval($3->getstring() + "; ");
+                  //delete $1; delete $3;
+                  $$=new nodeThreeChildren($1, $2, $3);
+                  $$->setval("<vardec> --> ID <multibrackets> ID SEMI\n");
+                  }
+;
+exp:   name       {
+                  $$=new nodeString("<exp> --> <name>\n");
+                  $$->setleft($1);
+                  }
+       | NULLT    {
+                  //$$=new nodeString($1->getstring()); delete $1; 
+                  $$=new nodeString("<exp> --> NULL\n"); 
+                  delete $1; 
+                  }
+       | NUMBER   {      
+                  $$=new nodeString("<exp> --> NUMBER\n"); 
+                  $$->setleft($1);
+                  }
+       | READ LPAREN RPAREN    {
+                  //$$=new nodeString($1->getstring());
+                  //$$->setright(new nodeString("() "));
+                  $$=new nodeString("<exp> --> READ LPAREN RPAREN\n"); 
+                  delete $1;
+                  }
+       | newexp   {
+                  $$=new nodeString("<exp> --> <newexp>\n");
+                  $$->setleft($1);
+                  }
+       | LPAREN exp RPAREN    { 
+                  //cout << "(e) :" << $2->getint() << endl;        
+                  //$$=new nodeParExp($2);
+                  $$=new nodeString("<exp> --> LPAREN <exp> RPAREN\n");
+                  $$->setleft($2);
+                  }
+       | name LPAREN RPAREN    {
+                  $$=new nodeString("<exp> --> <name> LPAREN RPAREN\n");
+                  $$->setleft($1);
+                  }
+       | exp PLUS exp { 
+                  $$=new Node($1,$3);
+                  $$->setval("<exp> --> <exp> PLUS <exp>\n");
+                  }
+       | exp MINUS exp { 
+                  $$=new Node($1,$3);
+                  $$->setval("<exp> --> <exp> MINUS <exp>\n");
+                  }
+       | exp OR exp  { 
+                  $$=new Node($1,$3);
+                  $$->setval("<exp> --> <exp> OR <exp>\n");
+                  }
+       | exp TIMES exp  { 
+                  $$=new Node($1,$3);
+                  $$->setval("<exp> --> <exp> TIMES <exp>\n");
+                  }
+       | exp DIV exp {
+                  $$=new Node($1,$3);
+                  $$->setval("<exp> --> <exp> DIV <exp>\n");
+                  }
+       | exp MOD exp { 
+                  $$=new Node($1,$3);
+                  $$->setval("<exp> --> <exp> MOD <exp>\n");
+                  }
+       | exp AND exp  { 
+                  $$=new Node($1,$3);
+                  $$->setval("<exp> --> <exp> AND <exp>\n");
+                  }
+       | exp EQ exp  { 
+                  $$=new Node($1,$3);
+                  $$->setval("<exp> --> <exp> EQ <exp>\n");
+                  }
+       | exp NE exp  { 
+                  $$=new Node($1,$3);
+                  $$->setval("<exp> --> <exp> NE <exp>\n");
+                  }
+       | exp GE exp { 
+                  $$=new Node($1,$3);
+                  $$->setval("<exp> --> <exp> GE <exp>\n");
+                  }
+       | exp LE exp { 
+                  $$=new Node($1,$3);
+                  //$$->setval(" <= ");
+                  $$->setval("<exp> --> <exp> LE <exp>\n");
+                  }
+       | exp GT exp  { 
+                  $$=new Node($1,$3);
+                  //$$->setval(" > ");
+                  $$->setval("<exp> --> <exp> GT <exp>\n");
+                  }
+       | exp LT exp  { 
+                  $$=new Node($1,$3);
+                  //$$->setval(" < ");
+                  $$->setval("<exp> --> <exp> LT <exp>\n");
+                  }
+       | MINUS exp  %prec NEG {     
+                  //$$=new node($2);
+                  $$=new nodeString("<exp> --> MINUS <exp>\n");
+                  $$->setleft($2);
+                  }
+       | PLUS exp {      
+                  //$$=new nodePlus($2);
+                  $$=new nodeString("<exp> --> PLUS <exp>\n");
+                  $$->setleft($2);
+                  }
+       | NOT exp  {
+                  //$$=new nodeNot($2);
+                  $$=new nodeString("<exp> --> NOT <exp>\n");
+                  $$->setleft($2);
+                  }
+;
+newexp:  NEW ID LPAREN RPAREN {
+                  //$$=new nodeString($2->getstring());
+                  //$$->setleft(new nodeString($1->getstring()+" "));
+                  //$$->setright(new nodeString("() "));
+                  $$=new nodeString("<newexp> --> NEW ID LPAREN RPAREN\n");
+                  $$->setleft($2);
+                  delete $1;
+                  }
+       | NEW simpletype { 
+                  //$$=new Node(new nodeString($1->getstring()), $2);
+                  //$$->setval(" ");
+                  //delete $1;
+                  $$=new nodeString("<newexp> --> NEW <simpletype>\n");
+                  $$->setleft($2);
+                  }
+       | NEW simpletype bracketexps{
+                  $$=new Node($2, $3);
+                  $$->setval("<newexp> --> NEW <simpletype> <bracketexps>\n");
+                  delete $1;
+                  }
+       | NEW idbrack { 
+                  //$$=new nodeString($1->getstring()+" ");
+                  $$=new nodeString("<newexp> --> NEW <idbrack>\n");
+                  $$->setright($2);
+                  delete $1;
+                  }
+       | NEW simpletype bracketexps multibrackets {
+                  //$$=new nodePrintAtStartThreeChildren($2, $3, $4);
+                  $$=new nodeThreeChildren($2, $3, $4);
+                  $$->setval("<newexp> --> NEW <simpletype> <bracketexps> <multibrackets>\n");
+                  delete $1;
+                  }
+       | NEW ID bracketexps multibrackets {
+                  //$$=new nodePrintAtStartThreeChildren($2, $3, $4);
+                  //$$->setval($1->getstring());
+                  $$=new nodeThreeChildren($2, $3, $4);
+                  $$->setval("<newexp> --> NEW ID <bracketexps> <multibrackets>\n");
+                  delete $1;
+                  }
+;
+type: simpletype  {
+                  $$=new nodeString("<type> --> <simpletype>\n");
+                  $$->setleft($1);
+                  }
+;
+simpletype: INT   {
+                  //$$=new nodeString($1->getstring()); 
+                  //delete $1; 
+                  $$=new nodeString("<simpletype> --> INT\n");
+                  delete $1; 
+                  }
+;
+bracketexps: bracketexp {
+                  $$=new nodeString("<bracketexps> --> <bracketexp>\n");
+                  $$->setleft($1);
+                  }
+       | bracketexps bracketexp {
+                  $$=new Node($1,$2);
+                  $$->setval("<bracketexps> --> <bracketexps> <bracketexp>\n");
+                  }
+;
+bracketexp: LBRACK exp RBRACK    {     
+                  //cout<<"[ " << $2->getstring() << "]\n";
+                        //$$=new nodeBrackExp($2);
+                  $$=new nodeString("<bracketexp> --> LBRACK <exp> RBRACK\n");
+                  $$->setleft($2);
+                  }
+;
+multibrackets: LBRACK RBRACK {
+                  $$=new nodeString("<multibrackets> --> LBRACK RBRACK\n");
+                  }
+       | multibrackets LBRACK RBRACK {
+                  $$=new nodeString("<multibrackets> --> <multibrackets> LBRACK RBRACK\n");
+                  $$->setleft($1);
+                  }
+;
+name:  THIS       {
+                  $$=new nodeString("<name> --> THIS\n"); 
+                  delete $1; 
+                  }
+       | ID       {
+                  //$$=new nodeString($1->getstring()); delete $1; 
+                  $$=new nodeString("<name> --> ID\n"); 
+                  $$->setleft($1);
+                  }
+       | name DOT ID {
+                  $$=new Node($1,$3);
+                  //$$->setval(".");
+                  $$->setval("<name> --> <name> DOT ID\n");
+                  }
+       | name bracketexps {
+                  $$=new Node($1,$2);
+                  $$->setval("<name> --> <bracketexps>\n");
+                  }
+       | idbrack  { 
+                  $$=new nodeString("<name> --> <idbrack>\n"); 
+                  $$->setleft($1);
+                  }
+;
+idbrack: ID bracketexps {
+                  $$=new Node($1,$2);
+                  $$->setval("<idbrack> --> ID <bracketexps>\n");
+                  }
+;
+%%

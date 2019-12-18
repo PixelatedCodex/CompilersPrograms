@@ -1,0 +1,55 @@
+// VARDEC
+;
+int main;
+main that;
+int[][] main;
+main[] that;
+// EXP
+hiThere;
+342;
+null;
+read(); 
+(hithere);
+main();
+4+6;
+9-2;
+6||4;
+8*1;
+7/3;
+6%5;
+9&&5;
+9==8;
+6!=8;
+8<=9;
+9>=8;
+8<9;
+9>8;
++5;
+-3;
+!3;
+
+// NEW EXP
+new ugh();
+new int;
+new int[8];
+new crazy[8][kfjasdf];
+new int[8][][];
+new crazy[8][][];
+//NAME
+this;
+happy;
+gar;
+this.happy;
+purple.pink;
+this[4][3];
+blue.yellow[3][6];
+seriously[8][3];
+this.yell[hi][screwu];
+garfield;
+// ERROR CHECKING
+8 + * 7;
+&9;
+&h;
+// SHOULDN'T HAVE ANYTHING ELSE BUT A COMMENT
+
+nothere;

@@ -1,0 +1,10 @@
+# Makefile
+# Heather Aust
+# September 16, 2019
+# Program 01
+CXXFLAGS=-std=c++11 -Wall -GGDB
+
+program1: program1.cpp
+
+#	flex++ -- warn program1.lpp
+	g++ ${CXXFLAGS} program1.cpp -o program1

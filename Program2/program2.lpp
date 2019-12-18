@@ -1,0 +1,89 @@
+%{
+/*
+* program2.lpp
+* Heather Aust
+* COSC 4785 Fall 2019
+* Program 02
+* September 25, 2019
+*/
+
+#include "program2.hpp"
+
+int yyColumn=1;
+int yyRow=1;
+int errCount = 0;
+%}
+
+%option outfile="program2_lex.cpp"
+%option noyywrap
+%x comment
+%x error
+
+space			[ ]
+tab			[\t]
+identifier		[_a-zA-Z][_0-9a-zA-Z]*
+number			[+-]?[0-9]+
+ops			"*"|"/"|"%"|"<"|">"|"!"|"+"|"-"|"="
+enclosing_op		[\[\{()\}\]]
+single_ops		{ops}|{enclosing_op}
+double_ops		"&&"|"=="|">="|"<="|"!="|"||"|"//"|"/*"
+
+%%
+\/\/.*[\n]		{yyColumn=1; yyRow++;}
+"/*"         		BEGIN(comment);
+<comment>[^*\n]*	{yyColumn+=yyleng;}
+<comment>"*"+[^*/\n]*	{yyColumn+=yyleng;}
+<comment>\n             {yyColumn=1; yyRow++;}
+<comment>"*"+"/"        {yyColumn+=yyleng; BEGIN(INITIAL);}
+"["		{return LBRACK;}
+"]"		{return RBRACK;}
+"{"		{return LBRACE;}
+"}"		{return RBRACE;}
+"!="		{return NEQ;}
+"=="		{return EQ;}
+"<="		{return LEQ;}
+">="		{return GEQ;}
+"&&"		{return AND;}
+"||"		{return OR;}
+"<"		{return LT;}
+">"		{return GT;}
+"!"		{return NOT;}
+"+"		{return PLUS;}
+"-"		{return MINUS;}
+"*"		{return TIMES;}
+"/"		{return DIV;}
+"%"		{return MOD;}
+";"		{return SEMI;}
+","		{return COMMA;}
+"("		{return LPAREN;}
+")"		{return RPAREN;}
+"="		{return ASSIGN;}
+"."		{return DOT;}
+"int"		{return INT;}
+"void"		{return VOID;}
+"class"		{return CLASS;}
+"new"		{return NEW;}
+"print"		{return PRINT;}
+"read"		{return READ;}
+"return"	{return RETURN;}
+"while"		{return WHILE;}
+"if"		{return IF;}
+"else"		{return ELSE;}
+"this"		{return THIS;}
+"null"		{return NULLT;}
+{identifier}	{return IDENTIFIER;}
+{space}		{yyColumn++;}
+{tab}		{yyColumn += 8 - (yyColumn % 8);}
+"\n"		{yyColumn = 1; yyRow++;}
+{number}	{return NUMBER;}
+.		{errCount++; if(errCount > 20){return ERRORS;} 
+		yymore(); yyColumn++; 
+		BEGIN(error);}
+<error>[ \t\n]|{single_ops}	{yyless(yyleng-1);
+				BEGIN(INITIAL);
+				if(yyleng == 1){ return ER_CH;} else {return ER_WD;}}
+<error>{double_ops}		{yyless(yyleng-2);
+				BEGIN(INITIAL);
+				if(yyleng == 1){ return ER_CH;} else {return ER_WD;}}
+<error>.		{yymore(); yyColumn++;}
+%%

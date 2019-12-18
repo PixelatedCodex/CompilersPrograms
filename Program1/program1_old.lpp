@@ -1,0 +1,35 @@
+%option outfile="program1_lex.cpp"
+%option noyywrap
+
+compare_op	["=="|"<"|">"|">="|"<="|"!="]
+logical_op	["||"]["&&"]
+math_op		[+*/-]
+enclosing_op	[\{\}\[\]()]
+punctuation	[.,;]
+keyword		["this"|"if"|"else"|"while"]
+identifier	[_a-zA-Z][_0-9a-zA-Z]*
+number		[1-9][0-9]*
+exponent	["e"|"E"][+|-]?{number}
+float		{number}[{exponent}|["."{number}{exponent}?]]
+newline		[\n]
+tab		[\t]
+space		[ ]+
+
+
+%%
+
+{compare_op}	return 1;
+{logical_op}	return 2;
+{math_op}	return 3;
+{enclosing_op}	return 4;
+{punctuation}	return 5;
+{keyword}	return 6;
+{identifier}	return 7;
+{number}	return 8;
+{float}		return 9;
+{newline}	return 11;
+{space}		return 12;
+{tab}		return 13;
+"/*"		return 14;
+"*/"		return 15;
+.		return 10;

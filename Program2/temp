@@ -1,0 +1,105 @@
+newexp1			"new"{simple_type}"("{arglist}")"
+newexp2			"new"{simple_type}("["{expression}"]")*("[]")*
+new_expression		{newexp1}|{newexp2}
+exp1			{name}
+exp2			{number}
+exp3			"null"
+exp4			{name}"("{arglist}")"
+exp5			"read""("")"
+exp6			{new_expression}
+exp7			{unary_op}{expression}
+exp8			{expression}{relation_op}{expression}
+exp9			{expression}{sum_op}{expression}
+exp10			{expression}{product_op}{expression}
+exp11			"("{expression}")"
+expression		{exp1}|{exp2}|{exp3}|{exp4}|{exp5}|{exp6}|{exp7}|{exp8}|{exp9}|{exp10}|{exp11}
+optional_expression	{expression}?
+condstmt1		"if""("{expression}")"{statement}
+condstmt2		"if""("{expression}")"{statement}"else"{statement}
+conditional_statement	{condstmt1}|{condstmt2}
+arglist			({expression}(","{expression})*)?
+nm1			"this"
+nm2			{identifier}
+nm3			{name}"."{identifier}
+nm4			{name}"["{expression}"]"
+name			{nm1}|{nm2}|{nm3}|{nm4}
+stmt1			";"
+stmt2			{name}"="{expression}";"
+stmt3			{name}"("{arglist}")"";"
+stmt4			"print""("{arglist}")"";"
+stmt5			{conditional_statement}
+stmt6			"while""("{expression}")"{statement}
+stmt7			"return"{optional_expression}";"
+stmt8			{block}
+statement		{stmt1}|{stmt2}|{stmt3}|{stmt4}|{stmt5}|{stmt6}|{stmt7}|{stmt8}
+local_var_decl		{type}{identifier}
+block			"{"{local_var_decl}*{statement}*"}"
+parameter		{type}{identifier}
+parameter_list		({parameter}(","{parameter})*)?
+result_type		{type}|"void"
+method_decl		{result_type}{identifier}"("{parameter_list}")"{block}
+constructor_decl	({identifier}"("{parameter_list}")"{block})?
+simple_type		"int"|{identifier}
+type			{simple_type}|({type}"[""]")
+var_decl		{type}{identifier}
+class_body		"{"{var_decl}*{constructor_decl}*{method_decl}*"}"
+class_decl		{class}{identifier}{class_body}
+program			{class_decl}+
+
+{program}		return PROGRAM_RTN;
+{class_decl}		return CLASS_DECL_RTN;
+{class_body}		return CLASS_BODY_RTN;
+{var_decl}		return VAR_DECL_RTN;
+{type}			return TYPE_RTN;
+{simple_type}		return SIMPLE_TYPE_RTN;
+{constructor_decl}	return CONSTRUCTOR_DECL_RTN;
+{method_decl}		return METHOD_DECL_RTN;
+{result_type}		return RESULT_TYPE_RTN;
+{parameter_list}	return PARAMETER_LIST_RTN;
+{parameter}		return PARAMETER_RTN;
+{block}			return BLOCK_RTN;
+{local_var_decl}	return LOCAL_VAR_DECL_RTN;
+{statement}		return STATEMENT_RTN;
+{name}			return NAME_RTN;
+{arglist}		return ARGLIST_RTN;
+{conditional_statement}	return CONDITIONAL_STATEMENT_RTN;
+{optional_expression}	return OPTIONAL_EXPRESSION_RTN;
+{expression}		return EXPRESSION_RTN;
+{new_expression}	return NEW_EXPRESSION_RTN;
+
+/**
+ * Processes c style comments '/ *  * /'
+ */
+void cStyleComments()
+{
+  yyColumn+= myScanner.YYLeng();
+  while((rtn = myScanner.yylex()) != 0) {
+    if(rtn == NEWLINE_RTN) { // newline
+      yyColumn = 1;
+      yyRow++;
+    }
+    else { // any other input
+      yyColumn += myScanner.YYLeng();
+      if(rtn == C_COMMENT_END_RTN) { // end of comment section */
+	return;
+      }
+    }
+  }
+}
+
+.({identifier}|{number})	{return ER_WD;}
+.		{return ER_CH; BEGIN(INITIAL);}
+
+
+
+			
+if(YYLeng() == 1){ 
+  return ER_CH;
+}
+else {
+  return ER_WD;
+}
+
+<error>{operator}	{yyless(YYLeng()-1);
+			BEGIN(INITIAL);
+			if(YYLeng() == 1){ return ER_CH;} else {return ER_WD;}}

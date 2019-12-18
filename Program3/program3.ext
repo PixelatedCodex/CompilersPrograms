@@ -1,0 +1,14 @@
+Heather Aust
+Program 3
+Compilers 
+October 27, 2019
+
+
+Error Handling Documentation:
+Lexical error - Unrecognized characters: 
+  For unrecognized characters, it will print out an error message that it came across
+  an unrecognized character and then skip the character and continue checking.
+  
+Syntax error:
+  If Bison can't match something before a semicolon, it will create an error
+  for that entire line, indicating where it first started failing to match.

@@ -1,0 +1,86 @@
+
+/**
+ * Get the rest of the characters on the current line
+ */
+void eatToNewline(){
+  string s = "";
+  char c;
+  int i;
+  //eat until either end of file (-1) or newline
+  while((i = (c = getchar())) != -1){
+    s += c;
+    if(i == '\n'){
+      break;
+    }
+  }
+  //Note: can't call newline here because we already added
+  // what was in yyText to currLine, so it'll appear twice.
+  currLine += s;
+  lines.push_back(currLine);
+  yyColumn = 1;
+  yyRow++;
+  currLine = ""; // clear the currentLine
+}
+
+
+/*
+ * Given num, return how many digits are in num
+ */
+int numDigits(int num){
+  int dig = 0;
+  while(num){
+    num /= 10;
+    dig++;
+  }
+  return dig;
+}
+
+void printError(const char *msg){
+  
+  // print in following format
+  // r:c 'entire line' 
+  // ^ pointing to error
+  // error information
+  
+  //string errMsg = yyRow + ":" + yyPrevColumn + " " + lines.at(yyRow-2);
+  
+  
+  // subtract 2 from yyrow because : vectors start at 0, 
+  // and yyrow is already on the next line
+  cerr << yyRow <<":" << yyPrevColumn <<" "<<lines.at(yyRow-2);
+  
+  //figure out how many characters in "r:c " and add to yyPrevColumn
+  int temp = yyPrevColumn + 1; // Account for ':' and ' ' and decrease 1 for ^
+  temp += numDigits(yyPrevColumn);
+  temp += numDigits(yyRow);
+  
+  
+  for(int i = 0; i < temp; i++){
+    cerr<<" ";
+  }
+  cerr<<"^"<<endl;
+  cerr << msg << endl << endl;
+}
+
+       | name bracketexps {
+                        $$=new Node($1,$2);
+                        $$->setval("<name> --> <bracketexps>\n");
+                        }
+
+       | name bracketexps {
+                        $$=new Node($1,$2);
+                        $$->setval("<name> --> <name> <bracketexps>\n");
+                        }
+       | idbrack { 
+                        $$=new nodeString("<name> --> <idbrack>\n"); 
+      $$->setleft($1);
+                        }
+nameplus:               {
+                        }
+                        
+                        ; BEGIN(error);}
+<error>[^\n]*  {addToCurrLine();}
+<error>\n       {newLine(); yyPrevColumn = syntErrCol;
+    yyerror("Lexical Error"); BEGIN(INITIAL);}
+<error><<EOF>>  {currLine += '\n'; newLine(); yyPrevColumn = syntErrCol;
+    yyerror("Lexical Error"); BEGIN(INITIAL);}

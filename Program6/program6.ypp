@@ -1,0 +1,812 @@
+/* vim: ft=yacc
+ * That vim filetype setting is not need if I don't rename the file
+ * Simple Infix notation calculator.  
+ *
+ * $Author: kbuckner $
+ * $Date: 2019-10-07 14:37:15-06 $
+ * $Id: simple.ypp,v 1.2 2019-10-07 14:37:15-06 kbuckner Exp kbuckner $
+ *
+ * Based on the Bison examples. But I had to fall back to the old style
+ * union because could not get the api.value.type declaration to
+ * work with a pointer. 
+ * 
+ * $Log: simple.ypp,v $
+ * Revision 1.2  2019-10-07 14:37:15-06  kbuckner
+ * changed to ypp. Added some comments.
+ *
+ * Revision 1.1  2017-10-04 13:20:53-06  kbuckner
+ * Finally working version
+ * 
+ * Edited by Heather Aust
+ * Program 6
+ * Compilers
+ * December 8, 2019
+ *
+ */
+%{
+
+#include <iostream>
+#include <FlexLexer.h>
+#include "node.hpp"
+#include "SymbolTable.hpp"
+#include "TypeTable.hpp"
+
+//using namespace std;
+using std::cerr;
+using std::cout;
+using std::endl;
+using std::string;
+
+/*
+ * These are declared in "main" so that we can pass values between
+ * the two portions of the program.
+ */
+
+extern yyFlexLexer scanner;
+extern void yyadderror(const char *msg);
+extern void yyadderrormain(const char *msg);
+extern void yyremoveerrormain();
+extern void addToCurrExpTree(int);
+extern bool verifyExpIsInt();
+extern bool findTypeById(string, vector<string>*, string&);
+extern int yyrow, yyprevcol;
+extern Node *tree;
+extern SymbolTable *symbTable; // main symbol table
+extern TypeTable *typeTable;  // main type table
+SymbolTable *currSymbTable = 0; // symbol table for current scope
+TypeTable *currTypeTable = 0; // type table for current scope
+ExprTree *currExpTree = 0; // current expression tree to do type checking
+ExprTree *currExpTreeHead = 0;
+ExprTree *currBrackExpTree = 0; // curr bracket expression tree for type check
+string currSymbType, rtntype; // strings to store text referring to symbol
+vector<string> paramvec; // vector containing strings of parameters
+
+// 0 = no main yet, 
+// 1 = found main, checking to see if it's correct
+// 2 = main found and check complete
+extern int foundMain; // used to insure there is only one main
+extern bool isMain; // used to insure there is only one main
+bool isConstructor; // used to insure no return type on constructor
+int methodDecParamCheck; //array location of a similar method declaration
+string lrvalue; // string to store id of left-right value for type checking
+int brackexpcount = 0;
+ExprTree *brackexpTree = 0;
+ExprTree *newexpTree = 0;
+ExprTree *printexpTree = 0;
+ExprTree *condexpTree = 0;
+string simpletypevalue = "";
+string constmethvalue = "";
+vector <string> currargs;
+
+
+/* 
+ * Need to do this define, an "acceptable" hack to interface
+ * the C++ scanner with the C parser. 
+ * I can still use things like scanner.YYtext() here if I want. Just that
+ * bison does not know about cpp scanners. 
+ */
+
+#define yylex() scanner.yylex()
+
+// need the function prototype for the parser.
+
+void yyerror(const char *);
+
+
+/*
+ * There are lots of examples that have multiple types in the union here.
+ * Do not do that. Keep it simple, one type. This is the type that you use
+ * in the definitions for %type tokens.
+ */
+
+%}
+
+%union {
+  Node *ttype;
+}
+
+/* 
+ * Bison declarations.  All the 'names' here will be put into an enum
+ * in the *.tab.h file. Include that in the .l/.lpp file and then "return NUM;"
+ * passes back the value. 
+ *
+ * To assign pass the parser a value, say for NUM, you must use 
+ * yylval.ttype in the scanner. You could have a number of things in the union
+ * but do not get cute. pointers, char, int, double. DO NOT use a class or 
+ * struct. 
+ *
+ * The "exp" is only used here in this file but must be given a type if 
+ *(in this case) it is ever assigned a value. See the rules.
+ */
+%type<ttype> exp classstart conststart methstart stmtend
+%type<ttype> program classdec classbody newexp type simpletype
+%type<ttype> vardecs vardec constdecs constdec methdecs methdec
+%type<ttype> bracketexps bracketexp bracketexpbegin multibrackets 
+%type<ttype> block name
+%type<ttype> paramlist param locvardecs locvardec
+%type<ttype> statements statement arglist condstmt ifstmt ifstmtstart
+%type<ttype> unaryop relationop sumop productop typeid stmtassign
+%token<ttype> NUMBER ID 
+%token INT VOID CLASS NEW PRINT READ RETURN WHILE IF ELSE THIS NULLT
+%token LPAREN RPAREN LBRACK RBRACK LBRACE RBRACE SEMI DOT COMMA ASSIGN
+%left EQ NE GE LE GT LT
+%left OR
+%left TIMES DIV MOD AND     /* shift-reduce errors are solved by this */
+%left PLUS MINUS NOT    /* shift-reduce errors are solved by this */
+%precedence THEN
+%precedence ELSE
+
+
+%% /* The grammar follows.  */
+
+input:  program  {
+                  /* 
+                  * We have reached the end of the input and
+                  * now we are passing the results to the main function.
+                  */
+                  tree=$1;
+                  }
+;
+program: classdec {
+                  $$=new Node($1);
+                  }
+      | program classdec {
+                  $$=new Node($1, $2);
+                  }
+;
+classdec: classstart classbody {
+                  $$=new Node($1, $2);
+                  }
+;
+classstart: CLASS ID {
+                  $$=new Node($2);
+                  string str = $2->getstring();
+                  Symbol* s = new Symbol(str, str, "" , "class_type");
+                  if(!symbTable->addChildTable(s, currSymbTable)){
+                    yyadderror("Duplicate class declaration");
+                  }
+                  currTypeTable = typeTable->addChildTable(currSymbTable);
+                  }
+;
+classbody: LBRACE vardecs constdecs methdecs RBRACE{
+                  $$=new Node($2, $3, $4);
+                  }
+      |  LBRACE constdecs methdecs RBRACE{
+                  $$=new Node($2, $3);
+                  }
+      |  LBRACE vardecs methdecs RBRACE{
+                  $$=new Node($2, $3);
+                  }
+      |  LBRACE vardecs constdecs RBRACE{
+                  $$=new Node($2, $3);
+                  }
+      |  LBRACE vardecs RBRACE{
+                  $$=new Node($2);
+                  }
+      |  LBRACE constdecs RBRACE{
+                  $$=new Node($2);
+                  }
+      |  LBRACE methdecs RBRACE{
+                  $$=new Node($2);
+                  }
+      |  LBRACE RBRACE{
+                  $$=new Node();
+                  }
+       | error LBRACE {
+                  $$=new Node();
+                  yyadderror("Error declaring class");
+                  yyerrok;
+                  }
+;
+vardecs: vardec   {
+                  $$=new Node($1);
+                  }
+       | vardecs vardec {
+                  $$=new Node($1, $2);
+                  }
+;
+vardec: typeid stmtend {
+                  $$=new Node($1); 
+                  Node* n = $1->getchild(2);
+                  if(!currSymbTable->insert(n->getstring(), currSymbType)){
+                    yyadderror("Duplicate variable declaration");
+                  }
+                  currSymbType = "";
+                  }
+       | error stmtend {
+                  $$=new Node();
+                  yyadderror("Error declaring variable");
+                  yyerrok;
+                  }
+;
+typeid: type ID   {
+                  $$=new Node($1, $2); 
+                  }
+;
+type: simpletype  {
+                  $$=new Node($1);
+                  }
+       | INT multibrackets {
+                  $$=new Node( $2);
+                  currSymbType = "int" + currSymbType;
+                  }
+       | ID multibrackets {
+                  $$=new Node($1, $2);
+                  currSymbType = $1->getstring() +  currSymbType;
+                  }
+;
+simpletype: INT   {
+                  $$=new Node();
+                  currSymbType = "int";
+                  simpletypevalue = "int";
+                  }
+       | ID       {
+                  $$=new Node($1);
+                  currSymbType = $1->getstring();
+                  simpletypevalue = currSymbType;
+                  }
+;
+
+constdecs: constdec   {
+                  $$=new Node($1);
+                  currSymbTable = currSymbTable->getParent();
+                  currTypeTable = currTypeTable->getParent();
+                  isConstructor = false;
+                  }
+       | constdecs constdec {
+                  $$=new Node($1, $2);
+                  currSymbTable = currSymbTable->getParent();
+                  currTypeTable = currTypeTable->getParent();
+                  }
+;
+constdec: conststart LPAREN paramlist RPAREN block {
+                  $$=new Node($1, $3, $5);
+                  currSymbTable->setParams(paramvec);
+                  paramvec.clear();
+                  }
+       | conststart LPAREN RPAREN block {
+                  $$=new Node($1, $4);
+                  }
+       | error LPAREN {
+                  $$=new Node();
+                  yyadderror("Error declaring constructor name");
+                  yyerrok;
+                  currSymbType = "";
+                  }
+       | LPAREN error RPAREN {
+                  $$=new Node();
+                  yyadderror("Error declaring parameters");
+                  yyerrok;
+                  currSymbType = "";
+                  }
+       | error block {
+                  $$=new Node($2);
+                  yyadderror("Error declaring constructor, missing right parenthesis");
+                  yyerrok;
+                  currSymbType = "";
+                  }
+;
+
+conststart: ID    {
+                  $$=new Node($1);
+                  isConstructor = true;
+                  Symbol* s = new Symbol($1->getstring(), "constructor_type");
+                  if(!currSymbTable->addChildTable(s, currSymbTable)){
+                    yyadderror("Duplicate constructor declaration");
+                  }
+                  currTypeTable = currTypeTable->addChildTable(currSymbTable);
+                  }
+;
+methdecs: methdec   {
+                  $$=new Node($1);
+                  currSymbTable = currSymbTable->getParent();
+                  currTypeTable = currTypeTable->getParent();
+                  isConstructor = false;
+                  currSymbType = "";
+                  }
+       | methdecs methdec {
+                  $$=new Node($1, $2);
+                  currSymbTable = currSymbTable->getParent();
+                  currTypeTable = currTypeTable->getParent();
+                  currSymbType = "";
+                  }
+;
+methdec: methstart LPAREN paramlist RPAREN block {
+                  $$=new Node($1, $3, $5);
+                  currSymbTable->setParams(paramvec);
+                  // TODO: check params
+                  if(methodDecParamCheck == -1){
+                    yyremoveerrormain();
+                  }
+                  paramvec.clear();
+                  if(foundMain == 1){
+                    foundMain = 0;
+                  }
+                }
+      | methstart LPAREN RPAREN block {
+                  $$=new Node($1, $4);
+                  // TODO: check params
+                  if(methodDecParamCheck == -1){
+                    yyremoveerrormain();
+                  }
+                  if(foundMain == 1){
+                    yyremoveerrormain();
+                    foundMain = 2;
+                  }
+                }
+;
+methstart: typeid {
+                  $$=new Node($1);
+                  Node* n = $1->getchild(2);
+                  if(isMain){
+                    if(foundMain == 0){
+                      yyadderrormain("'main' can't have any arguments");
+                      foundMain = 1;
+                    }
+                    else{
+                      yyadderror("Can only have one 'main' method");
+                    }
+                  }
+                  string str = n->getstring();
+                  Symbol* s = new Symbol(str, str, currSymbType, "method_type");
+                  methodDecParamCheck = currSymbTable->addChildTable(s, currSymbTable);
+                  if(methodDecParamCheck > -1){
+                    yyadderrormain("Duplicate method declaration");
+                  }
+                  currTypeTable = currTypeTable->addChildTable(currSymbTable);
+                  currSymbType = "";
+                }
+      | VOID ID   {
+                  $$=new Node($2);
+                  if(isMain){
+                    if(foundMain == 0){
+                      yyadderrormain("'main' can't have any arguments");
+                      foundMain = 1;
+                    }
+                    else{ yyadderror("Can only have one 'main' method"); }
+                  }
+                  string str = $2->getstring();
+                  Symbol* s = new Symbol(str, str, "void", "method_type");
+                  methodDecParamCheck = currSymbTable->addChildTable(s, currSymbTable);
+                  if(methodDecParamCheck > -1){
+                    yyadderrormain("Duplicate method declaration");
+                  }
+                  currTypeTable = currTypeTable->addChildTable(currSymbTable);
+                }
+;
+paramlist: param  {
+                  $$=new Node($1);
+                  }
+      | paramlist COMMA param  {
+                  $$=new Node($1, $3);
+                  }
+;
+param: typeid  {
+                  $$=new Node($1);
+                  Node* n = $1->getchild(2);
+                  if(!currSymbTable->insert(n->getstring(), currSymbType)){
+                    yyadderror("Duplicate parameter declaration");
+                  }
+                  paramvec.push_back(currSymbType);
+                  currSymbType = "";
+                  }
+;
+block: LBRACE locvardecs statements RBRACE{
+                  $$=new Node($2, $3);
+                  }
+      | LBRACE locvardecs RBRACE{
+                  $$=new Node($2);
+                  }
+      | LBRACE statements RBRACE{
+                  $$=new Node($2);
+                  }
+      | LBRACE RBRACE{
+                  $$=new Node();
+                  }
+;
+locvardecs: locvardec  {
+                  $$=new Node($1);
+                  }
+      | locvardecs locvardec  {
+                  $$=new Node($1, $2);
+                  }
+;
+locvardec: typeid stmtend {
+                  $$=new Node($1);
+                  Node* n = $1->getchild(2);
+                  if(!currSymbTable->insert(n->getstring(), currSymbType)){
+                    yyadderror("Duplicate local variable declaration");
+                  }
+                  currSymbType = "";
+                  }
+       | error stmtend {
+                  $$=new Node();
+                  yyadderror("Error declaring local variable");
+                  yyerrok;
+                  currSymbType = "";
+                  }
+;
+statements: statement  {
+                  $$=new Node($1);
+                  }
+      | statements statement  {
+                  $$=new Node($1, $2);
+                  }
+;
+statement: stmtend  {
+                  $$=new Node();
+                  }
+       | stmtassign exp stmtend {
+                  $$=new Node($1, $2,  $3);
+                  }
+       | constmethstart arglist RPAREN stmtend {
+                  //TODO: make sure name doesn't evaluate to a class name
+                  string type="";
+                  bool isConst = findTypeById(constmethvalue, &currargs, type);
+                  if(isConst){
+                    yyadderror("Constructors can only be used with the new keyword");
+                  }
+                  cout<<"type of method is : "<< type << endl;
+                  currargs.clear();
+                  }
+       | constmethstart RPAREN stmtend {
+                  //TODO: make sure name doesn't evaluate to a class name
+                  string type="";
+                  bool isConst = findTypeById(constmethvalue, &currargs, type);
+                  if(isConst){
+                    yyadderror("Constructors can only be used with the new keyword");
+                  }
+                  currargs.clear();
+                  }
+       | printstart LPAREN arglist RPAREN stmtend {
+                  $$=new Node($3);
+                  // make sure all of arglist are ints
+                  int size = 0;
+                  if(!currargs.empty()){
+                    size = currargs.size();
+                    for(int i = 0; i < size; i++ ){
+                      if(currargs.at(i) != "int"){
+                        yyadderror("Print can only take integers");
+                      }
+                    }
+                  }
+                  lrvalue = "void";
+                  currExpTree = printexpTree; 
+                  //addToCurrExpTree(0);
+                  }
+       | printstart LPAREN RPAREN stmtend {
+                  $$=new Node();
+                  lrvalue = "void";
+                  currExpTree = printexpTree; 
+                  //addToCurrExpTree(0);
+                  }
+       | condstmt {
+                  $$=new Node($1);
+                  }
+       | whilestart RPAREN statement {
+                  }
+       | RETURN exp stmtend {
+                  $$=new Node($2);
+                  if(isConstructor){
+                    yyadderror("Constructor cannot have a return type");
+                  }
+                  else { // it is a method
+                    //TODO: check to see if the return type matches the method type
+                    // add to expression tree with left child as this and right as $2 
+                  }
+                  }
+       | RETURN stmtend {
+                  $$=new Node();
+                  }
+       | block    {
+                  $$=new Node($1);
+                  }
+;
+whilestart: iswhile LPAREN exp {
+                  if(!verifyExpIsInt()){
+                    yyadderror("Expression for while statement must evaluate to int");
+                  }
+                  currExpTree = condexpTree;
+                  }
+;
+iswhile: WHILE    {
+                  condexpTree = currExpTree;
+                  currExpTree = 0;
+                  }
+;
+printstart: PRINT {
+                  printexpTree = currExpTree; 
+                  currExpTree = 0;
+                  }
+;
+stmtassign: name ASSIGN  {
+                  addToCurrExpTree(0);
+                  addToCurrExpTree(2);
+                  }
+;
+stmtend : SEMI    {
+                  if(currExpTreeHead){
+                    currTypeTable->addNewTypeExpression(currExpTreeHead);
+                  }
+                  currExpTreeHead = 0;
+                  currExpTree = 0;
+                  }
+;
+name:  THIS       {
+                  $$=new Node();
+                  lrvalue = currSymbTable->getClass();
+                  }
+       | ID       {
+                  $$=new Node($1);
+                  lrvalue = $1->getstring();
+                  }
+       | name DOT ID {
+                  $$=new Node($1, $3);
+                  string id = $3->getstring();
+                  // look in lrvalue's symbol table for id
+                  lrvalue = currSymbTable->lookupType(lrvalue, id);
+                  //TODO it is currently not correct, it should only look in the top symbol table
+                  }
+       | THIS bracketexps {
+                  $$=new Node($2);
+                  yyadderror("Cannot have brackets after this");
+                  }
+       | ID bracketexps {
+                  $$=new Node($1, $2);
+                  string id = $1->getstring();
+                  string type = currSymbTable->lookupType(id);
+                  lrvalue = type.substr(0, type.size() - (2 * brackexpcount));
+                  addToCurrExpTree(0);
+                  brackexpcount = 0;
+                  }
+       | name DOT ID bracketexps {
+                  $$=new Node($1, $3, $4);
+                  string id = $3->getstring();
+                  string type = currSymbTable->lookupType(lrvalue, id);
+                  //TODO same problem as name DOT ID
+                  lrvalue = type.substr(0, type.size() - (2 * brackexpcount));
+                  brackexpcount = 0;
+                  }
+;
+arglist: exp      {
+                  $$=new Node($1);
+                  string str = currExpTree->typeCheck(currSymbTable);
+                  currargs.push_back(str);
+                  currExpTree = 0;
+                  }
+       | arglist COMMA exp     {
+                  $$=new Node($1, $3);
+                  string str = currExpTree->typeCheck(currSymbTable);
+                  currargs.push_back(str);
+                  currExpTree = 0;
+                  }
+;
+condstmt: ifstmt %prec THEN {
+                  $$=new Node($1);
+                  }
+      | ifstmt ELSE statement %prec ELSE{
+                  $$=new Node($1, $3);
+                  }
+;
+ifstmt: ifstmtstart RPAREN statement {
+                  }
+;
+ifstmtstart: isif LPAREN exp {
+                  if(!verifyExpIsInt()){
+                    yyadderror("expression for if statement must evaluate to int");
+                  }
+                  currExpTree = condexpTree;
+                  }
+;
+isif: IF          {
+                  condexpTree = currExpTree;
+                  currExpTree = 0;
+                  }
+;
+exp:   name       {
+                  $$=new Node($1);
+                  addToCurrExpTree(0);
+                  }
+       | NUMBER   {      
+                  $$=new Node($1);
+                  lrvalue = "int";
+                  addToCurrExpTree(0);
+                  }
+       | NULLT    {
+                  $$=new Node();
+                  lrvalue = "null";
+                  addToCurrExpTree(0);
+                  }
+       | constmethstart arglist RPAREN    {
+                  //can only be method, if constructor error
+                  string type="";
+                  bool isConst = findTypeById(constmethvalue, &currargs, type);
+                  if(isConst){
+                    yyadderror("Constructors can only be used with the new keyword");
+                  }
+                  lrvalue = type;
+                  addToCurrExpTree(0);
+                  currargs.clear();
+                  }
+       | constmethstart RPAREN    {
+                  //can only be method, if constructor error
+                  string type="";
+                  bool isConst = findTypeById(constmethvalue, &currargs, type);
+                  if(isConst){
+                    yyadderror("Constructors can only be used with the new keyword");
+                  }
+                  lrvalue = type;
+                  addToCurrExpTree(0);
+                  currargs.clear();
+                  }
+       | READ LPAREN RPAREN {
+                  $$=new Node();
+                  lrvalue = "int";
+                  addToCurrExpTree(0);
+                  }
+       | newexp   {
+                  $$=new Node($1);
+                  addToCurrExpTree(0);
+                  }
+       | unaryop exp  %prec NOT {
+                  $$=new Node($1, $2);
+                  if(!verifyExpIsInt()){
+                    yyadderror("Cannot perform a unaryop on an expression that is not an int");
+                  }
+                  }
+       | exp relationop exp %prec EQ{
+                  $$=new Node($1, $2, $3);
+                  }
+       | exp sumop exp   %prec OR{
+                  $$=new Node($1, $2, $3);
+                  }
+       | exp productop exp   %prec TIMES{
+                  $$=new Node($1, $2, $3);
+                  }
+       | LPAREN exp RPAREN   {
+                  $$=new Node($2);
+                  }
+;
+constmethstart : name LPAREN {
+                  constmethvalue = lrvalue;
+                  lrvalue = "";
+                  }
+;
+newexp:  newstart ID LPAREN arglist RPAREN {
+                  $$=new Node($2, $4);
+                  string type="";
+                  findTypeById($2->getstring(), &currargs, type);
+                  currargs.clear();
+                  lrvalue = type;
+                  currExpTree = newexpTree;
+                  addToCurrExpTree(0);
+                  }
+       | newstart ID LPAREN RPAREN {
+                  $$=new Node($2);
+                  string type="";
+                  findTypeById($2->getstring(), &currargs, type);
+                  currargs.clear();
+                  lrvalue = type;
+                  currExpTree = newexpTree;
+                  addToCurrExpTree(0);
+                  }
+       | newstart simpletype bracketexps{
+                  $$=new Node($2, $3);
+                  for(int i = 0; i < brackexpcount; i++ ){
+                    simpletypevalue += "[]";
+                  }
+                  brackexpcount = 0;
+                  lrvalue = simpletypevalue;
+                  currExpTree = newexpTree;
+                  }
+       | newstart simpletype bracketexps LBRACK RBRACK {
+                  $$=new Node($2, $3);
+                  $$=new Node($2, $3);
+                  for(int i = 0; i < brackexpcount+1; i++ ){
+                    simpletypevalue += "[]";
+                  }
+                  brackexpcount = 0;
+                  lrvalue = simpletypevalue;
+                  currExpTree = newexpTree;
+                  }
+;
+newstart: NEW     {
+                  newexpTree = currExpTree;
+                  currExpTree = 0;
+                  }
+;
+bracketexps: bracketexp {
+                  $$=new Node($1);
+                  }
+       | bracketexps bracketexp {
+                  $$=new Node($1,$2);
+                  }
+;
+bracketexp: bracketexpbegin exp RBRACK    {     
+                  $$=new Node($2);
+                  if(!verifyExpIsInt()){
+                    yyadderror("The expression inside brackets must evaluate to an int");
+                  }
+                  brackexpcount++;
+                  currExpTree = brackexpTree;
+                  }
+;
+bracketexpbegin: LBRACK {
+                  brackexpTree = currExpTree;
+                  }
+;
+multibrackets: LBRACK RBRACK {
+                  $$=new Node();
+                  currSymbType += "[]";
+                  }
+       | multibrackets LBRACK RBRACK {
+                  $$=new Node($1);
+                  currSymbType += "[]";
+                  }
+;
+unaryop: PLUS     {
+                  $$=new Node();
+                  }
+       | MINUS    {
+                  $$=new Node();
+                  }
+       | NOT    {
+                  $$=new Node();
+                  }
+;
+relationop: EQ    {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+       | NE       {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+       | LE       {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+       | GE       {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+       | LT       {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+       | GT       {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+;
+sumop: PLUS       {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+       | MINUS    {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+       | OR       {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+;
+productop: TIMES  {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+       | DIV      {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+       | MOD      {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+       | AND      {
+                  $$=new Node();
+                  addToCurrExpTree(1);
+                  }
+;
+%%

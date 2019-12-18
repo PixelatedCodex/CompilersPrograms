@@ -1,0 +1,40 @@
+%{
+
+//Heather Aust
+//COSC 4785 Fall 2019
+//Program 01
+//September 16, 2019
+
+
+#include <stdio.h>
+#define MAX 100
+ 
+int col=0;
+int row=0;
+%}
+
+compare_op	[==][<][>][>=][<=][!=]
+logical_op	[||][&&]
+math_op		[+-*/]
+enclosing_op	[\{\}\[\]()]
+punctuation	[.,;]
+keyword		["this"|"if"|"else"|"while"]
+identifier	[_a-zA-Z][_0-9a-zA-Z]*
+number		[0-9]+
+exponent	["e"|"E"][+|-]?{number}
+float		{number}[{exponent}|["."{number}{exponent}?]]
+newline		[\n]
+
+%%
+ 
+{compare_op}	return 1;
+{logical_op}	return 2;
+{math_op}	return 3;
+{enclosing_op}	return 4;
+{punctuation}	return 5;
+{keyword}	return 6;
+{identifier}	return 7;
+{number}	return 8;
+{float}		return 9;
+{newline}	return 11;
+.		return 10;

@@ -1,0 +1,759 @@
+/* vim: ft=yacc
+ * That vim filetype setting is not need if I don't rename the file
+ * Simple Infix notation calculator.  
+ *
+ * $Author: kbuckner $
+ * $Date: 2019-10-07 14:37:15-06 $
+ * $Id: simple.ypp,v 1.2 2019-10-07 14:37:15-06 kbuckner Exp kbuckner $
+ *
+ * Based on the Bison examples. But I had to fall back to the old style
+ * union because could not get the api.value.type declaration to
+ * work with a pointer. 
+ * 
+ * $Log: simple.ypp,v $
+ * Revision 1.2  2019-10-07 14:37:15-06  kbuckner
+ * changed to ypp. Added some comments.
+ *
+ * Revision 1.1  2017-10-04 13:20:53-06  kbuckner
+ * Finally working version
+ * 
+ * Edited by Heather Aust
+ * Program 6
+ * Compilers
+ * December 8, 2019
+ *
+ */
+%{
+
+#include <iostream>
+#include <FlexLexer.h>
+#include "node.hpp"
+#include "SymbolTable.hpp"
+#include "TypeTable.hpp"
+
+//using namespace std;
+using std::cerr;
+using std::cout;
+using std::endl;
+using std::string;
+
+/*
+ * These are declared in "main" so that we can pass values between
+ * the two portions of the program.
+ */
+
+extern yyFlexLexer scanner;
+extern void yyadderror(const char *msg);
+extern void yyadderrormain(const char *msg);
+extern void yyremoveerrormain();
+extern int yyrow, yyprevcol;
+extern Node *tree;
+extern SymbolTable *symbTable;
+extern TypeTable *typeTable;
+SymbolTable *currSymbTable = 0;
+TypeTable *currTypeTable = 0;
+Type *currTypeExp;
+string currSymbType, rtntype;
+vector<string> paramvec;
+// 0 = no main yet, 
+// 1 = found main, checking to see if it's correct
+// 2 = main found and check complete
+extern int foundMain; 
+extern bool isMain;
+bool isConstructor;
+bool isMethod;
+int methodDecParamCheck; //array location of a similar method declaration
+string lrvalue;
+
+
+/* 
+ * Need to do this define, an "acceptable" hack to interface
+ * the C++ scanner with the C parser. 
+ * I can still use things like scanner.YYtext() here if I want. Just that
+ * bison does not know about cpp scanners. 
+ */
+
+#define yylex() scanner.yylex()
+
+// need the function prototype for the parser.
+
+void yyerror(const char *);
+
+
+/*
+ * There are lots of examples that have multiple types in the union here.
+ * Do not do that. Keep it simple, one type. This is the type that you use
+ * in the definitions for %type tokens.
+ */
+
+%}
+
+%union {
+  Node *ttype;
+}
+
+/* 
+ * Bison declarations.  All the 'names' here will be put into an enum
+ * in the *.tab.h file. Include that in the .l/.lpp file and then "return NUM;"
+ * passes back the value. 
+ *
+ * To assign pass the parser a value, say for NUM, you must use 
+ * yylval.ttype in the scanner. You could have a number of things in the union
+ * but do not get cute. pointers, char, int, double. DO NOT use a class or 
+ * struct. 
+ *
+ * The "exp" is only used here in this file but must be given a type if 
+ *(in this case) it is ever assigned a value. See the rules.
+ */
+%type<ttype> exp classstart conststart methstart stmtend
+%type<ttype> program classdec classbody newexp type simpletype
+%type<ttype> vardecs vardec constdecs constdec methdecs methdec
+%type<ttype> bracketexps bracketexp multibrackets block
+%type<ttype> name nameidexp namethisexp nameend namedotexp
+%type<ttype> paramlist param locvardecs locvardec
+%type<ttype> statements statement arglist condstmt ifstmt
+%type<ttype> unaryop relationop sumop productop typeid
+%token<ttype> NUMBER ID 
+%token INT VOID CLASS NEW PRINT READ RETURN WHILE IF ELSE THIS NULLT
+%token LPAREN RPAREN LBRACK RBRACK LBRACE RBRACE SEMI DOT COMMA ASSIGN
+%left EQ NE GE LE GT LT
+%left OR
+%left TIMES DIV MOD AND     /* shift-reduce errors are solved by this */
+%left PLUS MINUS NOT    /* shift-reduce errors are solved by this */
+%precedence THEN
+%precedence ELSE
+
+
+%% /* The grammar follows.  */
+
+input:  program  {
+                  /* 
+                  * We have reached the end of the input and
+                  * now we are passing the results to the main function.
+                  */
+                  tree=$1;
+                  }
+;
+program: classdec {
+                  $$=new Node($1);
+                  $$->setval("<program> --> <classdec>\n");
+                  }
+      | program classdec {
+                  $$=new Node($1, $2);
+                  $$->setval("<program> --> <program> <classdec>\n");
+                  }
+;
+classdec: classstart classbody {
+                  $$=new Node($1, $2);
+                  $$->setval("<classdec> --> CLASS ID <classbody>\n");
+                  }
+;
+classstart: CLASS ID {
+                  $$=new Node($2);
+                  string str = $2->getstring();
+                  Symbol* s = new Symbol(str, str, "" , "class_type");
+                  if(!symbTable->addChildTable(s, currSymbTable)){
+                    yyadderror("Duplicate class declaration");
+                  }
+                  currTypeTable = typeTable->addChildTable(currSymbTable);
+                  }
+;
+classbody: LBRACE vardecs constdecs methdecs RBRACE{
+                  $$=new Node($2, $3, $4);
+                  $$->setval("<classbody> --> { <vardecs> <constdecs> <methdecs> }\n");
+                  }
+      |  LBRACE constdecs methdecs RBRACE{
+                  $$=new Node($2, $3);
+                  $$->setval("<classbody> --> { <constdecs> <methdecs> }\n");
+                  }
+      |  LBRACE vardecs methdecs RBRACE{
+                  $$=new Node($2, $3);
+                  $$->setval("<classbody> --> { <vardecs> <methdecs> }\n");
+                  }
+      |  LBRACE vardecs constdecs RBRACE{
+                  $$=new Node($2, $3);
+                  $$->setval("<classbody> --> { <vardecs> <constdecs> }\n");
+                  }
+      |  LBRACE vardecs RBRACE{
+                  $$=new Node($2);
+                  $$->setval("<classbody> --> { <vardecs> }\n");
+                  }
+      |  LBRACE constdecs RBRACE{
+                  $$=new Node($2);
+                  $$->setval("<classbody> --> { <constdecs> }\n");
+                  }
+      |  LBRACE methdecs RBRACE{
+                  $$=new Node($2);
+                  $$->setval("<classbody> --> { <methdecs> }\n");
+                  }
+      |  LBRACE RBRACE{
+                  $$=new Node();
+                  $$->setval("<classbody> --> {  }\n");
+                  }
+       | error LBRACE {
+                  $$=new Node();
+                  $$->setval("<classbody> --> error {\n");
+                  yyadderror("Error declaring class");
+                  yyerrok;
+                  }
+;
+vardecs: vardec   {
+                  $$=new Node($1);
+                  $$->setval("<vardecs> --> <vardec>\n");
+                  }
+       | vardecs vardec {
+                  $$=new Node($1, $2);
+                  $$->setval("<vardecs> --> <vardecs> <vardec>\n");
+                  }
+;
+vardec: typeid SEMI {
+                  $$=new Node($1); 
+                  $$->setval("<vardec> --> <typeid> SEMI\n");
+                  Node* n = $1->getchild(2);
+                  if(!currSymbTable->insert(n->getstring(), currSymbType)){
+                    yyadderror("Duplicate variable declaration");
+                  }
+                  currSymbType = "";
+                  }
+       | error SEMI {
+                  $$=new Node();
+                  $$->setval("<vardec> --> error SEMI\n");
+                  yyadderror("Error declaring variable");
+                  yyerrok;
+                  }
+;
+typeid: type ID   {
+                  $$=new Node($1, $2); 
+                  $$->setval("<typeid> --> <type> ID \n");
+                  }
+;
+type: simpletype  {
+                  $$=new Node($1);
+                  $$->setval("<type> --> <simpletype>\n");
+                  }
+       | INT multibrackets {
+                  $$=new Node( $2);
+                  $$->setval("<type> --> INT <multibrackets>\n");
+                  currSymbType = "int" + currSymbType;
+                  }
+       | ID multibrackets {
+                  $$=new Node($1, $2);
+                  $$->setval("<type> --> ID <multibrackets>\n");
+                  currSymbType = $1->getstring() +  currSymbType;
+                  }
+;
+simpletype: INT   {
+                  $$=new Node();
+                  $$->setval("<simpletype> --> INT\n");
+                  currSymbType = "int";
+                  }
+       | ID       {
+                  $$=new Node($1);
+                  $$->setval("<simpletype> --> ID\n");
+                  currSymbType = $1->getstring();
+                  }
+;
+
+constdecs: constdec   {
+                  $$=new Node($1);
+                  $$->setval("<constdecs> --> <constdec>\n");
+                  currSymbTable = currSymbTable->getParent();
+		  cout <<"Constdecs"<< currTypeTable << endl;
+                  currTypeTable = currTypeTable->getParent();
+                  isConstructor = false;
+                  isMethod = false;
+                  }
+       | constdecs constdec {
+                  $$=new Node($1, $2);
+                  $$->setval("<constdecs> --> <constdecs> <constdec>\n");
+                  currSymbTable = currSymbTable->getParent();
+		  cout <<"Constdecs"<< currTypeTable << endl;
+                  currTypeTable = currTypeTable->getParent();
+		  cout <<"Constdecs"<< currTypeTable << endl;
+                  }
+;
+constdec: conststart LPAREN paramlist RPAREN block {
+                  $$=new Node($1, $3, $5);
+                  currSymbTable->setParams(paramvec);
+                  paramvec.clear();
+                  }
+       | conststart LPAREN RPAREN block {
+                  $$=new Node($1, $4);
+                  }
+       | error LPAREN {
+                  $$=new Node();
+                  yyadderror("Error declaring constructor name");
+                  yyerrok;
+                  }
+       | LPAREN error RPAREN {
+                  $$=new Node();
+                  yyadderror("Error declaring parameters");
+                  yyerrok;
+                  }
+       | error block {
+                  $$=new Node($2);
+                  yyadderror("Error declaring constructor, missing right parenthesis");
+                  yyerrok;
+                  }
+;
+
+conststart: ID    {
+                  $$=new Node($1);
+                  isConstructor = true;
+                  Symbol* s = new Symbol($1->getstring(), "constructor_type");
+                  if(!currSymbTable->addChildTable(s, currSymbTable)){
+                    yyadderror("Duplicate constructor declaration");
+                  }
+		  cout <<"conststart"<< currTypeTable << endl;
+                  currTypeTable = currTypeTable->addChildTable(currSymbTable);
+                  }
+;
+methdecs: methdec   {
+                  $$=new Node($1);
+                  $$->setval("<methdecs> --> <methdec>\n");
+                  currSymbTable = currSymbTable->getParent();
+		  cout <<"methdecs"<< currTypeTable << endl;
+                  currTypeTable = currTypeTable->getParent();
+		  cout <<"methdecs"<< currTypeTable << endl;
+                  isConstructor = false;
+                  isMethod = false;
+                  }
+       | methdecs methdec {
+                  $$=new Node($1, $2);
+                  $$->setval("<methdecs> --> <methdecs> <methdec>\n");
+                  currSymbTable = currSymbTable->getParent();
+		  cout <<"methdecs"<< currTypeTable << endl;
+                  currTypeTable = currTypeTable->getParent();
+		  cout <<"methdecs parent "<< currTypeTable << endl;
+                  }
+;
+methdec: methstart LPAREN paramlist RPAREN block {
+                  $$=new Node($1, $3, $5);
+                  $$->setval("<methdec> --> <typeid> ( <paramlist> ) <block>\n");
+                  currSymbTable->setParams(paramvec);
+                  // TODO: check params
+                  if(methodDecParamCheck == -1){
+                    yyremoveerrormain();
+                  }
+                  paramvec.clear();
+                  if(foundMain == 1){
+                    foundMain = 0;
+                  }
+                }
+      | methstart LPAREN RPAREN block {
+                  $$=new Node($1, $4);
+                  $$->setval("<methdec> --> <typeid> ( ) <block>\n");
+                  // TODO: check params
+                  if(methodDecParamCheck == -1){
+                    yyremoveerrormain();
+                  }
+                  if(foundMain == 1){
+                    yyremoveerrormain();
+                    foundMain = 2;
+                  }
+                }
+;
+methstart: typeid {
+                  $$=new Node($1);
+                  Node* n = $1->getchild(2);
+                  if(isMain){
+                    if(foundMain == 0){
+                      yyadderrormain("'main' can't have any arguments");
+                      foundMain = 1;
+                    }
+                    else{
+                      yyadderror("Can only have one 'main' method");
+                    }
+                  }
+                  isMethod = true;
+                  string str = n->getstring();
+                  Symbol* s = new Symbol(str, str, currSymbType, "method_type");
+                  methodDecParamCheck = currSymbTable->addChildTable(s, currSymbTable);
+                  if(methodDecParamCheck > -1){
+                    yyadderrormain("Duplicate method declaration");
+                  }
+                  currSymbType = "";
+                }
+      | VOID ID   {
+                  $$=new Node($2);
+                  if(isMain){
+                    if(foundMain == 0){
+                      yyadderrormain("'main' can't have any arguments");
+                      foundMain = 1;
+                    }
+                    else{ yyadderror("Can only have one 'main' method"); }
+                  }
+                  string str = $2->getstring();
+                  Symbol* s = new Symbol(str, str, "void", "method_type");
+                  methodDecParamCheck = currSymbTable->addChildTable(s, currSymbTable);
+                  if(methodDecParamCheck > -1){
+                    yyadderrormain("Duplicate method declaration");
+                  }
+		  cout <<"methstart"<< currTypeTable << endl;
+                  currTypeTable = currTypeTable->addChildTable(currSymbTable);
+                }
+;
+paramlist: param  {
+                  $$=new Node($1);
+                  $$->setval("<paramlist> --> <param>\n");
+                  }
+      | paramlist COMMA param  {
+                  $$=new Node($1, $3);
+                  $$->setval("<paramlist> --> <paramlist> , <param>\n");
+                  }
+;
+param: typeid  {
+                  $$=new Node($1);
+                  $$->setval("<param> --> <typeid>\n");
+                  Node* n = $1->getchild(2);
+                  if(!currSymbTable->insert(n->getstring(), currSymbType)){
+                    yyadderror("Duplicate parameter declaration");
+                  }
+                  paramvec.push_back(currSymbType);
+                  currSymbType = "";
+                  }
+;
+block: LBRACE locvardecs statements RBRACE{
+                  $$=new Node($2, $3);
+                  $$->setval("<block> --> LBRACE <locvardecs> <statements> RBRACE\n");
+                  }
+      | LBRACE locvardecs RBRACE{
+                  $$=new Node($2);
+                  $$->setval("<block> --> LBRACE  <statements> RBRACE\n");
+                  }
+      | LBRACE statements RBRACE{
+                  $$=new Node($2);
+                  $$->setval("<block> --> LBRACE <locvardecs> RBRACE\n");
+                  }
+      | LBRACE RBRACE{
+                  $$=new Node();
+                  $$->setval("<block> --> LBRACE RBRACE\n");
+                  }
+;
+locvardecs: locvardec  {
+                  $$=new Node($1);
+                  $$->setval("<locvardecs> --> <locvardec>\n");
+                  }
+      | locvardecs locvardec  {
+                  $$=new Node($1, $2);
+                  $$->setval("<locvardecs> --> <locvardecs> <locvardec>\n");
+                  }
+;
+locvardec: typeid SEMI {
+                  $$=new Node($1);
+                  $$->setval("<locvardec> --> <typeid> SEMI\n");
+                  Node* n = $1->getchild(2);
+                  if(!currSymbTable->insert(n->getstring(), currSymbType)){
+                    yyadderror("Duplicate local variable declaration");
+                  }
+                  currSymbType = "";
+                  }
+       | error SEMI {
+                  $$=new Node();
+                  $$->setval("<locvardec> --> error SEMI\n");
+                  yyadderror("Error declaring local variable");
+                  yyerrok;
+                  }
+;
+statements: statement  {
+                  $$=new Node($1);
+                  $$->setval("<statements> --> <statement>\n");
+                  }
+      | statements statement  {
+                  $$=new Node($1, $2);
+                  $$->setval("<statements> --> <statements> <statement>\n");
+                  }
+;
+statement: stmtend  {
+                  $$=new Node();
+                  $$->setval("<statement> --> ;\n");
+                  }
+       | name ASSIGN exp stmtend {
+                  $$=new Node($1, $3);
+                  $$->setval("<statement> --> <name> = <exp> ;\n");
+                  }
+       | name LPAREN arglist RPAREN stmtend {
+                  $$=new Node($1, $3);
+                  $$->setval("<statement> --> <name> ( <arglist> ) ;\n");
+                  }
+       | name LPAREN RPAREN stmtend {
+                  $$=new Node($1);
+                  $$->setval("<statement> --> <name> ( ) ;\n");
+                  }
+       | PRINT LPAREN arglist RPAREN stmtend {
+                  $$=new Node($3);
+                  $$->setval("<statement> --> PRINT ( <arglist> ) ;\n");
+                  lrvalue = "int";
+                  }
+       |  PRINT LPAREN RPAREN stmtend {
+                  $$=new Node();
+                  $$->setval("<statement> --> PRINT ( ) ;\n");
+                  lrvalue = "int";
+                  }
+       | condstmt {
+                  $$=new Node($1);
+                  $$->setval("<statement> --> <condstmt>\n");
+                  }
+       | WHILE LPAREN exp RPAREN statement {
+                  $$=new Node($3, $5);
+                  $$->setval("<statement> --> WHILE ( <exp> ) <statement>\n");
+                  }
+       | RETURN exp stmtend {
+                  $$=new Node($2);
+                  if(isConstructor){
+                    yyadderror("Constructor cannot have a return type");
+                  }
+                  if(isMethod){
+                    //TODO: check to see if the return type matches the method type
+                  }
+                  $$->setval("<statement> --> RETURN <exp> ;\n");
+                  }
+       | RETURN stmtend {
+                  $$=new Node();
+                  $$->setval("<statement> --> RETURN ;\n");
+                  }
+       | block    {
+                  $$=new Node($1);
+                  $$->setval("<statement> --> <block>\n");
+                  }
+;
+
+stmtend : SEMI    {
+                  currTypeExp = 0;
+                  }
+;
+name: namethisexp {
+                  $$=new Node($1);
+                  }
+       | nameend  {
+                  $$=new Node($1);
+                  }
+;
+nameend: nameidexp {
+                  $$=new Node($1);
+                  $$->setval("<name> --> ID\n");
+                  }
+       | namedotexp {
+                  $$=new Node($1);
+                  }
+;
+namethisexp:  THIS     {
+                  $$=new Node();
+                  }
+       | THIS bracketexps {
+                  $$=new Node($2);
+                  }
+       | THIS DOT nameidexp {
+                  $$=new Node($3);
+                  }
+       | THIS DOT nameidexp DOT namedotexp{
+                  $$=new Node($3, $5);
+                  }
+       | THIS bracketexps DOT nameidexp {
+                  $$=new Node($2, $4);
+                  }
+       | THIS bracketexps DOT nameidexp DOT namedotexp{
+                  $$=new Node($2, $4, $6);
+                  }
+;
+nameidexp:  ID       {
+                  $$=new Node($1);
+                  $$->setval("<name> --> ID\n");
+                  }
+       | ID bracketexps {
+                  $$=new Node($1, $2);
+                  $$->setval("<name> --> ID <bracketexps>\n");
+                  }
+;
+namedotexp: nameend DOT nameidexp {
+                  $$=new Node($1, $3);
+                  $$->setval("<name> --> <name> DOT ID\n");
+                  }
+;
+arglist: exp      {
+                  $$=new Node($1);
+                  $$->setval("<arglist> --> <exp>\n");
+                  }
+       | arglist COMMA exp     {
+                  $$=new Node($1, $3);
+                  $$->setval("<arglist> --> <arglist> , <exp>\n");
+                  }
+;
+condstmt: ifstmt %prec THEN{
+                  $$=new Node($1);
+                  $$->setval("<condstmt> --> <ifstmt>\n");
+                  }
+      | ifstmt ELSE statement %prec ELSE{
+                  $$=new Node($1, $3);
+                  $$->setval("<condstmt> --> <ifstmt> ELSE <statement>\n");
+                  }
+;
+ifstmt: IF LPAREN exp RPAREN statement {
+                  $$=new Node($3, $5);
+                  $$->setval("<ifstmt> --> IF ( <exp> ) <statement>\n");
+                  }
+;
+exp:   name       {
+                  $$=new Node($1);
+                  $$->setval("<exp> --> <name>\n");
+                  }
+       | NUMBER   {      
+                  $$=new Node($1);
+                  $$->setval("<exp> --> NUMBER\n");
+                  lrvalue = "int";
+                  }
+       | NULLT    {
+                  $$=new Node();
+                  $$->setval("<exp> --> NULL\n"); 
+                  lrvalue = "null";
+                  }
+       | name LPAREN arglist RPAREN    {
+                  $$=new Node($1, $3);
+                  $$->setval("<exp> --> <name> ( <arglist> )\n"); 
+                  }
+       | name LPAREN RPAREN    {
+                  $$=new Node($1);
+                  $$->setval("<exp> --> <name> ( )\n"); 
+                  }
+       | READ LPAREN RPAREN {
+                  $$=new Node();
+                  $$->setval("<exp> --> READ ( )\n"); 
+                  lrvalue = "int";
+                  }
+       | newexp   {
+                  $$=new Node($1);
+                  $$->setval("<exp> --> <newexp>\n");
+                  }
+       | unaryop exp  %prec NOT {
+                  $$=new Node($1, $2);
+                  $$->setval("<exp> --> <unaryop> <exp>\n");
+                  
+                  }
+       | exp relationop exp %prec EQ{
+                  $$=new Node($1, $2, $3);
+                  $$->setval("<exp> --> <exp> <relationop> <exp>\n");
+                  }
+       | exp sumop exp   %prec OR{
+                  $$=new Node($1, $2, $3);
+                  $$->setval("<exp> --> <exp> <sumop> <exp>\n");
+                  }
+       | exp productop exp   %prec TIMES{
+                  $$=new Node($1, $2, $3);
+                  $$->setval("<exp> --> <exp> <productop> <exp>\n");
+                  }
+       | LPAREN exp RPAREN   {
+                  $$=new Node($2);
+                  $$->setval("<exp> --> <exp> <relationop> <exp>\n");
+                  }
+;
+newexp:  NEW ID LPAREN arglist RPAREN {
+                  $$=new Node($2, $4);
+                  $$->setval("<newexp> --> NEW ID ( <arglist> )\n");
+                  }
+       | NEW ID LPAREN RPAREN {
+                  $$=new Node($2);
+                  $$->setval("<newexp> --> NEW ID ( )\n");
+                  }
+       | NEW simpletype bracketexps{
+                  $$=new Node($2, $3);
+                  $$->setval("<newexp> --> NEW <simpletype> <bracketexps>\n");
+                  }
+       | NEW simpletype bracketexps LBRACK RBRACK {
+                  $$=new Node($2, $3);
+                  $$->setval("<newexp> --> NEW <simpletype> <bracketexps> <multibrackets>\n");
+                  }
+;
+bracketexps: bracketexp {
+                  $$=new Node($1);
+                  $$->setval("<bracketexps> --> <bracketexp>\n");
+                  }
+       | bracketexps bracketexp {
+                  $$=new Node($1,$2);
+                  $$->setval("<bracketexps> --> <bracketexps> <bracketexp>\n");
+                  }
+;
+bracketexp: LBRACK exp RBRACK    {     
+                  $$=new Node($2);
+                  $$->setval("<bracketexp> --> [ <exp> ]\n");
+                  }
+;
+multibrackets: LBRACK RBRACK {
+                  $$=new Node();
+                  $$->setval("<multibrackets> --> [ ]\n");
+                  currSymbType += "[]";
+                  }
+       | multibrackets LBRACK RBRACK {
+                  $$=new Node($1);
+                  $$->setval("<multibrackets> --> <multibrackets> [ ]\n");
+                  currSymbType += "[]";
+                  }
+;
+unaryop: PLUS     {
+                  $$=new Node();
+                  $$->setval("<unaryop> --> +\n");
+                  }
+       | MINUS    {
+                  $$=new Node();
+                  $$->setval("<unaryop> --> -\n");
+                  }
+       | NOT    {
+                  $$=new Node();
+                  $$->setval("<unaryop> --> !\n");
+                  }
+;
+relationop: EQ    {
+                  $$=new Node();
+                  $$->setval("<relationop> --> ==\n");
+                  }
+       | NE       {
+                  $$=new Node();
+                  $$->setval("<relationop> --> !=\n");
+                  }
+       | LE       {
+                  $$=new Node();
+                  $$->setval("<relationop> --> <=\n");
+                  }
+       | GE       {
+                  $$=new Node();
+                  $$->setval("<relationop> --> >=\n");
+                  }
+       | LT       {
+                  $$=new Node();
+                  $$->setval("<relationop> --> <\n");
+                  }
+       | GT       {
+                  $$=new Node();
+                  $$->setval("<relationop> --> >\n");
+                  }
+;
+sumop: PLUS       {
+                  $$=new Node();
+                  $$->setval("<sumop> --> +\n");
+                  }
+       | MINUS    {
+                  $$=new Node();
+                  $$->setval("<sumop> --> -\n");
+                  }
+       | OR       {
+                  $$=new Node();
+                  $$->setval("<sumop> --> ||\n");
+                  }
+;
+productop: TIMES  {
+                  $$=new Node();
+                  $$->setval("<productop> --> *\n");
+                  }
+       | DIV      {
+                  $$=new Node();
+                  $$->setval("<productop> --> / \n");
+                  }
+       | MOD      {
+                  $$=new Node();
+                  $$->setval("<productop> --> %\n");
+                  }
+       | AND      {
+                  $$=new Node();
+                  $$->setval("<productop> --> &&\n");
+                  }
+;
+%%

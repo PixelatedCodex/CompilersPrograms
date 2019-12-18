@@ -1,0 +1,78 @@
+// program1.cpp
+// Heather Aust
+// COSC 4785 Fall 2019
+// Program 01
+// September 16, 2019
+
+#include <FlexLexer.h>
+#include <fstream>
+#include <stdio.h>
+
+using namespace std;
+
+//int main(int argc, char **argv)
+int main()
+{
+  yyFlexLexer myScanner(stdin, stdout);
+  //fstream file;
+  //char * filename = *argv;
+  int rtn;
+  int temp;
+  int col = 0;
+  int row = 0;
+
+  //file.open(filename);
+  //myScanner.yyrestart(&file);
+  
+  printf("Line\tColumn\tType\tLength\tValue\n");
+
+  while((rtn = myScanner.yylex()) != 0) 
+  {
+    temp = rtn - 1;
+    
+    if(rtn == 11 || rtn == 12 || rtn == 13)
+    {
+      printf("%d\t%d\t%d\t%d\n", row, col, temp, myScanner.YYLeng());
+      if(rtn == 11)
+      {
+	col = 0;
+	row++;
+      }
+      else if (rtn == 13)
+      {
+	col += 8 - (col % 8);
+      }
+      else
+      {
+	col += myScanner.YYLeng();
+      }
+    }
+    else if( rtn == 14 )
+    {
+      col+= myScanner.YYLeng();
+      while((rtn = myScanner.yylex()) != 0)
+      {
+	if(rtn == 11)
+	{
+	  col = 0;
+	  row++;
+	}
+	else
+	{
+	  col += myScanner.YYLeng();
+	  if(rtn == 15)
+	    {
+	      break;
+	    }
+	}
+      }
+    }
+    else 
+    {
+      printf("%d\t%d\t%d\t%d\%s\n", row, col, temp, myScanner.YYLeng(), myScanner.YYText());
+      col += myScanner.YYLeng();
+    }
+  }
+
+  return 0;
+}

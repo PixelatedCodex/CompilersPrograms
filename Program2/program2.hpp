@@ -1,0 +1,45 @@
+#define LBRACK 1
+#define RBRACK 2
+#define LBRACE 3
+#define RBRACE 4
+#define NEQ 5
+#define EQ 6
+#define LT 7
+#define GT 8
+#define LEQ 9
+#define GEQ 10
+#define AND 11
+#define OR 12
+#define NOT 13
+#define PLUS 14
+#define MINUS 15
+#define TIMES 16
+#define DIV 17
+#define MOD 18
+#define SEMI 19
+#define COMMA 20
+#define LPAREN 21
+#define RPAREN 22
+#define ASSIGN 23
+#define COMMENT 24
+#define DOT 25
+
+#define INT 26
+#define VOID 27
+#define CLASS 28
+#define NEW 29
+#define PRINT 30
+#define READ 31
+#define RETURN 32
+#define WHILE 33
+#define IF 34
+#define ELSE 35
+#define THIS 36
+#define NULLT 37
+
+#define IDENTIFIER 38
+#define NUMBER 39
+
+#define ER_CH 40
+#define ER_WD 41
+#define ERRORS 42
